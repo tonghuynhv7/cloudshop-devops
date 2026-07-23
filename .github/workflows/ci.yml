@@ -13,6 +13,13 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      POSTGRES_USER: clouduser
+      POSTGRES_PASSWORD: cloudpass-ci
+      POSTGRES_DB: cloudshop
+      API_PORT: 3000
+      NGINX_PORT: 8080
+      REDIS_PORT: 6379
 
     steps:
       - name: Checkout source
@@ -31,11 +38,6 @@ jobs:
             -t ghcr.io/${{ github.repository_owner }}/cloudshop-api:latest \
             ./backend
 
-      - name: Push API Image
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          docker push \
-            ghcr.io/${{ github.repository_owner }}/cloudshop-api:latest
 
       - name: Build and start services
         run: docker compose up -d --build
@@ -54,6 +56,11 @@ jobs:
 
           echo "API did not become ready"
           exit 1
+      - name: Push API Image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker push \
+            ghcr.io/${{ github.repository_owner }}/cloudshop-api:latest
 
       - name: Show container status
         if: ${{ always() }}
