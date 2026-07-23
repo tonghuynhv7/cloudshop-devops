@@ -41,6 +41,23 @@ jobs:
 
       - name: Build and start services
         run: docker compose up -d --build
+      - name: Diagnose API failure
+        if: ${{ failure() }}
+        run: |
+          echo "=== Docker Compose PS ==="
+          docker compose ps
+
+          echo "=== API logs ==="
+          docker compose logs --no-color api
+
+          echo "=== API healthcheck ==="
+          API_CONTAINER=$(docker compose ps -q api)
+
+          if [ -n "$API_CONTAINER" ]; then
+          docker inspect \
+             --format='{{range .State.Health.Log}}{{println .Output}}{{end}}' \
+             "$API_CONTAINER"
+          fi
 
       - name: Wait for API
         run: |
