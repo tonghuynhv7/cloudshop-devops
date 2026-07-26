@@ -10,6 +10,20 @@ on:
     branches:
       - main
 
+env:
+  POSTGRES_DB: cloudshop
+  POSTGRES_USER: clouduser
+  POSTGRES_PASSWORD: cloudpass
+
+  DB_HOST: postgres
+  DB_PORT: 5432
+
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+
+  API_PORT: 3000
+  NGINX_PORT: 8080
+
 jobs:
   validate:
     name: Validate configuration
@@ -21,3 +35,48 @@ jobs:
 
       - name: Validate Docker Compose
         run: docker compose config --quiet
+
+  integration-test:
+    name: Integration test
+    needs: validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Build and start services
+        run: docker compose up -d --build
+
+      - name: Wait for API readiness
+        run: |
+          for i in {1..20}; do
+            if curl -f http://localhost:8080/api/health/ready; then
+              echo "API is ready"
+              exit 0
+            fi
+
+            echo "Waiting for API... attempt $i/20"
+            sleep 3
+          done
+
+          echo "API did not become ready"
+          exit 1
+
+      - name: Test gateway
+        run: curl -f http://localhost:8080/
+
+      - name: Test products API
+        run: curl -f http://localhost:8080/api/products
+
+      - name: Show container status
+        if: ${{ always() }}
+        run: docker compose ps
+
+      - name: Show logs on failure
+        if: ${{ failure() }}
+        run: docker compose logs --no-color
+
+      - name: Cleanup
+        if: ${{ always() }}
+        run: docker compose down -v
