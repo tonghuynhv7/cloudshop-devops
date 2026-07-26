@@ -4,62 +4,51 @@ on:
   push:
     branches:
       - main
-  pull_request:
+      - "feature/**"
 
-permissions:
-  contents: read
-  packages: write
+  pull_request:
+    branches:
+      - main
+
+env:
+  POSTGRES_DB: cloudshop
+  POSTGRES_USER: clouduser
+  POSTGRES_PASSWORD: cloudpass
+
+  DB_HOST: postgres
+  DB_PORT: 5432
+
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+
+  API_PORT: 3000
+  NGINX_PORT: 8080
 
 jobs:
-  test:
+  validate:
+    name: Validate configuration
     runs-on: ubuntu-latest
-    env:
-      POSTGRES_USER: clouduser
-      POSTGRES_PASSWORD: cloudpass-ci
-      POSTGRES_DB: cloudshop
-      API_PORT: 3000
-      NGINX_PORT: 8080
-      REDIS_PORT: 6379
 
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate Docker Compose
+        run: docker compose config --quiet
 
-      - name: Build API Image
-        run: |
-          docker build \
-            -t ghcr.io/${{ github.repository_owner }}/cloudshop-api:latest \
-            ./backend
+  integration-test:
+    name: Integration test
+    needs: validate
+    runs-on: ubuntu-latest
 
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
 
       - name: Build and start services
         run: docker compose up -d --build
-      - name: Diagnose API failure
-        if: ${{ failure() }}
-        run: |
-          echo "=== Docker Compose PS ==="
-          docker compose ps
 
-          echo "=== API logs ==="
-          docker compose logs --no-color api
-
-          echo "=== API healthcheck ==="
-          API_CONTAINER=$(docker compose ps -q api)
-
-          if [ -n "$API_CONTAINER" ]; then
-          docker inspect \
-             --format='{{range .State.Health.Log}}{{println .Output}}{{end}}' \
-             "$API_CONTAINER"
-          fi
-
-      - name: Wait for API
+      - name: Wait for API readiness
         run: |
           for i in {1..20}; do
             if curl -f http://localhost:8080/api/health/ready; then
@@ -67,17 +56,17 @@ jobs:
               exit 0
             fi
 
-            echo "Waiting for API..."
+            echo "Waiting for API... attempt $i/20"
             sleep 3
           done
 
           echo "API did not become ready"
           exit 1
-      - name: Push API Image
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          docker push \
-            ghcr.io/${{ github.repository_owner }}/cloudshop-api:latest
+
+      - name: Test gateway
+        run: curl -f http://localhost:8080/
+
+     
 
       - name: Show container status
         if: ${{ always() }}
@@ -85,7 +74,7 @@ jobs:
 
       - name: Show logs on failure
         if: ${{ failure() }}
-        run: docker compose logs
+        run: docker compose logs --no-color
 
       - name: Cleanup
         if: ${{ always() }}
