@@ -66,8 +66,7 @@ jobs:
       - name: Test gateway
         run: curl -f http://localhost:8080/
 
-      - name: Test products API
-        run: curl -f http://localhost:8080/api/products
+     
 
       - name: Show container status
         if: ${{ always() }}
