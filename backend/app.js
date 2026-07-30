@@ -12,13 +12,9 @@ const pool = new Pool({
   user: process.env.DB_USER || "clouduser",
   password: process.env.DB_PASSWORD || "cloudpass",
   database: process.env.DB_NAME || "cloudshop",
-
-  ssl:
-    process.env.DB_SSL === "true"
-      ? {
-          rejectUnauthorized: false,
-        }
-      : false,
+  ssl: {
+    rejectUnauthorized: false,
+  },
 });
 
 const redisClient = createClient({
