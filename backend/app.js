@@ -15,13 +15,24 @@ const pool = new Pool({
 });
 
 const redisClient = createClient({
-  url: `redis://${process.env.REDIS_HOST || "redis"}:${
-    process.env.REDIS_PORT || 6379
-  }`,
+  socket: {
+    host: process.env.REDIS_HOST || "redis",
+    port: Number(process.env.REDIS_PORT || 6379),
+    tls: process.env.REDIS_TLS === "true",
+    connectTimeout: 10000,
+  },
 });
 
 redisClient.on("error", (error) => {
   console.error("Redis:", error.message);
+});
+
+redisClient.on("connect", () => {
+  console.log("Redis socket connected");
+});
+
+redisClient.on("ready", () => {
+  console.log("Redis ready");
 });
 
 app.get("/", (req, res) => {
@@ -53,7 +64,6 @@ app.get("/health/ready", async (req, res) => {
   } catch (error) {
     health.postgres = "unhealthy";
     isReady = false;
-
     console.error("PostgreSQL health check failed:", error.message);
   }
 
@@ -63,7 +73,6 @@ app.get("/health/ready", async (req, res) => {
   } catch (error) {
     health.redis = "unhealthy";
     isReady = false;
-
     console.error("Redis health check failed:", error.message);
   }
 
@@ -72,13 +81,17 @@ app.get("/health/ready", async (req, res) => {
 
 async function startServer() {
   try {
+    console.log("Connecting to Redis...");
+
     await redisClient.connect();
+
+    console.log("Redis connected");
 
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`Server listening on port ${PORT}`);
     });
   } catch (error) {
-    console.error("Application startup failed:", error.message);
+    console.error("Application startup failed:", error);
     process.exit(1);
   }
 }
