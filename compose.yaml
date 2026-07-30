@@ -55,8 +55,14 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD}
       DB_NAME: ${POSTGRES_DB}
 
+      # PostgreSQL local trong Docker Compose không dùng SSL
+      DB_SSL: "false"
+
       REDIS_HOST: redis
       REDIS_PORT: ${REDIS_PORT:-6379}
+
+      # Redis local trong Docker Compose không dùng TLS
+      REDIS_TLS: "false"
 
     depends_on:
       postgres:
