@@ -13,16 +13,25 @@ env:
   AWS_REGION: ap-southeast-1
   ECR_REPOSITORY: cloudshop-dev-api
 
+  ECS_CLUSTER: cloudshop-dev-cluster
+  ECS_SERVICE: cloudshop-dev-api-service
+  CONTAINER_NAME: cloudshop-api
+
 jobs:
-  build-and-push:
-    name: Build and Push Image
+  deploy:
+    name: Build and Deploy to ECS
     runs-on: ubuntu-latest
 
     steps:
+      # =====================================================
+      # 1. CHECKOUT
+      # =====================================================
       - name: Checkout source
         uses: actions/checkout@v4
 
-      # GitHub OIDC -> AWS STS -> Temporary Credentials
+      # =====================================================
+      # 2. GITHUB OIDC -> AWS STS
+      # =====================================================
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -32,19 +41,25 @@ jobs:
       - name: Verify AWS identity
         run: aws sts get-caller-identity
 
-      # Temporary AWS credentials -> ECR authorization token -> Docker login
+      # =====================================================
+      # 3. LOGIN ECR
+      # =====================================================
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      # =====================================================
+      # 4. BUILD + PUSH IMAGE
+      # =====================================================
       - name: Build and push Docker image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          IMAGE_URI=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 
-          echo "Building $IMAGE_URI"
+          echo "Building image:"
+          echo "$IMAGE_URI"
 
           docker build \
             -t "$IMAGE_URI" \
@@ -54,5 +69,58 @@ jobs:
 
           echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
 
-      - name: Show deployed image
-        run: echo "$IMAGE_URI"
+      # =====================================================
+      # 5. GET CURRENT TASK DEFINITION
+      # =====================================================
+      - name: Download current ECS task definition
+        run: |
+          TASK_DEF_ARN=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE" \
+            --query 'services[0].taskDefinition' \
+            --output text)
+
+          echo "Current task definition:"
+          echo "$TASK_DEF_ARN"
+
+          aws ecs describe-task-definition \
+            --task-definition "$TASK_DEF_ARN" \
+            --query taskDefinition \
+            > task-definition.json
+
+      # =====================================================
+      # 6. RENDER NEW TASK DEFINITION
+      # =====================================================
+      - name: Render new ECS task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ env.IMAGE_URI }}
+
+      # =====================================================
+      # 7. DEPLOY ECS
+      # =====================================================
+      - name: Deploy ECS task definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      # =====================================================
+      # 8. VERIFY SERVICE
+      # =====================================================
+      - name: Verify ECS service
+        run: |
+          aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE" \
+            --query 'services[0].{
+              taskDefinition:taskDefinition,
+              desired:desiredCount,
+              running:runningCount,
+              pending:pendingCount
+            }'
