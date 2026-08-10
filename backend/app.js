@@ -114,10 +114,8 @@ app.get("/", (req, res) => {
  * ALB dùng endpoint này.
  */
 app.get("/health/live", (req, res) => {
-  res.status(200).json({
-    status: "alive",
-    service: "cloudshop-api",
-    timestamp: new Date().toISOString(),
+  res.status(500).json({
+    status: "broken",
   });
 });
 
