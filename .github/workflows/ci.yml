@@ -1,81 +1,129 @@
-name: CloudShop CI
+name: CloudShop CD
 
 on:
   push:
     branches:
       - main
-      - "feature/**"
 
-  pull_request:
-    branches:
-      - main
+permissions:
+  contents: read
+  id-token: write
 
 env:
-  POSTGRES_DB: cloudshop
-  POSTGRES_USER: clouduser
-  POSTGRES_PASSWORD: cloudpass
+  AWS_REGION: ${{ vars.AWS_REGION }}
 
-  DB_HOST: postgres
-  DB_PORT: 5432
+  ECR_REPOSITORY: cloudshop-dev-api
 
-  REDIS_HOST: redis
-  REDIS_PORT: 6379
+  ECS_CLUSTER: cloudshop-dev-cluster
+  ECS_SERVICE: cloudshop-dev-api-service
 
-  API_PORT: 3000
-  NGINX_PORT: 8080
+  CONTAINER_NAME: cloudshop-api
 
 jobs:
-  validate:
-    name: Validate configuration
+  deploy:
+    name: Deploy to ECS
     runs-on: ubuntu-latest
 
     steps:
+      # =====================================================
+      # SOURCE CODE
+      # =====================================================
+
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Validate Docker Compose
-        run: docker compose config --quiet
+      # =====================================================
+      # AWS OIDC
+      # =====================================================
 
-  integration-test:
-    name: Integration test
-    needs: validate
-    runs-on: ubuntu-latest
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
+      # =====================================================
+      # ECR LOGIN
+      # =====================================================
 
-      - name: Build and start services
-        run: docker compose up -d --build
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Wait for API readiness
+      # =====================================================
+      # IMAGE TAG
+      # =====================================================
+
+      - name: Set image URI
+        id: image
         run: |
-          for i in {1..20}; do
-            if curl -f http://localhost:8080/api/health/ready; then
-              echo "API is ready"
-              exit 0
-            fi
+          IMAGE_TAG=${GITHUB_SHA::7}
+          IMAGE_URI=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG
 
-            echo "Waiting for API... attempt $i/20"
-            sleep 3
-          done
+          echo "tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
 
-          echo "API did not become ready"
-          exit 1
+      # =====================================================
+      # BUILD + PUSH
+      # =====================================================
 
-      - name: Test gateway
-        run: curl -f http://localhost:8080/
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t "${{ steps.image.outputs.uri }}" \
+            ./backend
 
-     
+      - name: Push Docker image
+        run: |
+          docker push "${{ steps.image.outputs.uri }}"
 
-      - name: Show container status
-        if: ${{ always() }}
-        run: docker compose ps
+      # =====================================================
+      # GET CURRENT ECS TASK DEFINITION
+      # =====================================================
 
-      - name: Show logs on failure
-        if: ${{ failure() }}
-        run: docker compose logs --no-color
+      - name: Download current task definition
+        run: |
+          TASK_DEFINITION_ARN=$(aws ecs describe-services \
+            --cluster "${{ env.ECS_CLUSTER }}" \
+            --services "${{ env.ECS_SERVICE }}" \
+            --query 'services[0].taskDefinition' \
+            --output text)
 
-      - name: Cleanup
-        if: ${{ always() }}
-        run: docker compose down -v
+          aws ecs describe-task-definition \
+            --task-definition "$TASK_DEFINITION_ARN" \
+            --query taskDefinition \
+            > task-definition.json
+
+          jq 'del(
+            .taskDefinitionArn,
+            .revision,
+            .status,
+            .requiresAttributes,
+            .compatibilities,
+            .registeredAt,
+            .registeredBy
+          )' task-definition.json > task-definition-clean.json
+
+      # =====================================================
+      # REPLACE IMAGE
+      # =====================================================
+
+      - name: Render new ECS task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition-clean.json
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ steps.image.outputs.uri }}
+
+      # =====================================================
+      # DEPLOY ECS
+      # =====================================================
+
+      - name: Deploy ECS task definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true

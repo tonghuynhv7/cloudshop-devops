@@ -14,7 +14,7 @@ const DB_HOST = process.env.DB_HOST || "postgres";
 const DB_PORT = Number(process.env.DB_PORT || 5432);
 const DB_NAME = process.env.DB_NAME || "cloudshop";
 const DB_USER = process.env.DB_USER || "clouduser";
-const DB_PASSWORD = process.env.DB_PASSWORD || "cloudpass";
+const DB_PASSWORD = process.env.DB_PASSWORD;
 const DB_SSL = process.env.DB_SSL === "true";
 
 const REDIS_HOST = process.env.REDIS_HOST || "redis";
@@ -23,6 +23,9 @@ const REDIS_TLS = process.env.REDIS_TLS === "true";
 
 const PRODUCTS_CACHE_KEY = "cloudshop:products";
 const PRODUCTS_CACHE_TTL = 60;
+if (!DB_PASSWORD) {
+  throw new Error("DB_PASSWORD environment variable is required");
+}
 
 app.use(express.json());
 

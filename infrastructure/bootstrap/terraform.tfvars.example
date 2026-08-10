@@ -1,0 +1,3 @@
+aws_region   = "ap-southeast-1"
+github_owner = "tonghuynhv7"
+github_repo  = "cloudshop-devops"

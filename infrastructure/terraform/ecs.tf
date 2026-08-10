@@ -104,8 +104,12 @@ resource "aws_ecs_service" "api" {
 
   launch_type = "FARGATE"
 
-  deployment_controller {
-    type = "ECS"
+  deployment_minimum_healthy_percent = 100
+  deployment_maximum_percent         = 200
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
   }
 
   network_configuration {

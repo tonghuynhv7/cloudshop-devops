@@ -10,7 +10,7 @@ permissions:
   id-token: write
 
 env:
-  AWS_REGION: ap-southeast-1
+  AWS_REGION: ${{ vars.AWS_REGION }}
   ECR_REPOSITORY: cloudshop-dev-api
 
   ECS_CLUSTER: cloudshop-dev-cluster
@@ -35,7 +35,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::089959489412:role/CloudShop-GitHubActions-ECR-Role
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/CloudShop-GitHubActions-ECR-Role
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Verify AWS identity
