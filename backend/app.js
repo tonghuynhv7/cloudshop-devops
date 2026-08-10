@@ -21,6 +21,9 @@ const REDIS_HOST = process.env.REDIS_HOST || "redis";
 const REDIS_PORT = Number(process.env.REDIS_PORT || 6379);
 const REDIS_TLS = process.env.REDIS_TLS === "true";
 
+const PRODUCTS_CACHE_KEY = "cloudshop:products";
+const PRODUCTS_CACHE_TTL = 60;
+
 app.use(express.json());
 
 /* =========================
@@ -46,8 +49,19 @@ const pool = new Pool({
 });
 
 pool.on("error", (error) => {
-  console.error("PostgreSQL error:", error.message);
+  console.error("PostgreSQL pool error:", error.message);
 });
+
+async function initializeProductsTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS products (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      price NUMERIC(10,2) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+}
 
 /* =========================
    REDIS
@@ -70,6 +84,14 @@ const redisClient = createClient({
   },
 });
 
+redisClient.on("connect", () => {
+  console.log("Redis socket connected");
+});
+
+redisClient.on("ready", () => {
+  console.log("Redis ready");
+});
+
 redisClient.on("error", (error) => {
   console.error("Redis error:", error.message);
 });
@@ -87,8 +109,9 @@ app.get("/", (req, res) => {
 });
 
 /*
+ * Liveness:
+ * Chỉ kiểm tra API process còn sống.
  * ALB dùng endpoint này.
- * Chỉ kiểm tra Node.js process còn sống.
  */
 app.get("/health/live", (req, res) => {
   res.status(200).json({
@@ -99,8 +122,8 @@ app.get("/health/live", (req, res) => {
 });
 
 /*
- * Kiểm tra API có sẵn sàng phục vụ request hay chưa.
- * PostgreSQL + Redis đều phải healthy.
+ * Readiness:
+ * PostgreSQL + Redis đều phải hoạt động.
  */
 app.get("/health/ready", async (req, res) => {
   const health = {
@@ -118,7 +141,11 @@ app.get("/health/ready", async (req, res) => {
   } catch (error) {
     ready = false;
     health.postgres = "unhealthy";
-    console.error("PostgreSQL health check failed:", error.message);
+
+    console.error(
+      "PostgreSQL health check failed:",
+      error.message
+    );
   }
 
   try {
@@ -126,26 +153,37 @@ app.get("/health/ready", async (req, res) => {
       throw new Error("Redis connection is not open");
     }
 
-    await redisClient.ping();
+    const response = await redisClient.ping();
+
+    if (response !== "PONG") {
+      throw new Error(`Unexpected Redis response: ${response}`);
+    }
+
     health.redis = "healthy";
   } catch (error) {
     ready = false;
     health.redis = "unhealthy";
-    console.error("Redis health check failed:", error.message);
+
+    console.error(
+      "Redis health check failed:",
+      error.message
+    );
   }
 
-  res.status(ready ? 200 : 503).json(health);
+  return res.status(ready ? 200 : 503).json(health);
 });
 
-/*
- * Demo Redis cache.
- */
+/* =========================
+   GET PRODUCTS
+========================= */
+
 app.get("/products", async (req, res) => {
   try {
-    const cacheKey = "cloudshop:products";
-
+    /*
+     * 1. Check Redis trước.
+     */
     if (redisClient.isOpen) {
-      const cached = await redisClient.get(cacheKey);
+      const cached = await redisClient.get(PRODUCTS_CACHE_KEY);
 
       if (cached) {
         return res.status(200).json({
@@ -155,40 +193,90 @@ app.get("/products", async (req, res) => {
       }
     }
 
-    const products = [
-      {
-        id: 1,
-        name: "CloudShop Laptop",
-        price: 1500,
-      },
-      {
-        id: 2,
-        name: "CloudShop Keyboard",
-        price: 100,
-      },
-      {
-        id: 3,
-        name: "CloudShop Mouse",
-        price: 50,
-      },
-    ];
+    /*
+     * 2. Cache miss -> query RDS.
+     */
+    const result = await pool.query(`
+      SELECT id, name, price, created_at
+      FROM products
+      ORDER BY id
+    `);
 
+    const products = result.rows;
+
+    /*
+     * 3. Cache dữ liệu trong Redis 60 giây.
+     */
     if (redisClient.isOpen) {
       await redisClient.setEx(
-        cacheKey,
-        60,
+        PRODUCTS_CACHE_KEY,
+        PRODUCTS_CACHE_TTL,
         JSON.stringify(products)
       );
     }
 
-    res.status(200).json({
-      source: "application",
+    return res.status(200).json({
+      source: "database",
       products,
     });
   } catch (error) {
     console.error("Get products failed:", error.message);
 
-    res.status(500).json({
+    return res.status(500).json({
+      error: "Internal server error",
+    });
+  }
+});
+
+/* =========================
+   CREATE PRODUCT
+========================= */
+
+app.post("/products", async (req, res) => {
+  try {
+    const { name, price } = req.body;
+
+    if (!name || price == null) {
+      return res.status(400).json({
+        error: "name and price are required",
+      });
+    }
+
+    const numericPrice = Number(price);
+
+    if (!Number.isFinite(numericPrice) || numericPrice < 0) {
+      return res.status(400).json({
+        error: "price must be a valid non-negative number",
+      });
+    }
+
+    /*
+     * Ghi dữ liệu thật vào PostgreSQL RDS.
+     */
+    const result = await pool.query(
+      `
+      INSERT INTO products (name, price)
+      VALUES ($1, $2)
+      RETURNING id, name, price, created_at
+      `,
+      [name, numericPrice]
+    );
+
+    /*
+     * Database đã thay đổi -> cache cũ không còn hợp lệ.
+     */
+    if (redisClient.isOpen) {
+      await redisClient.del(PRODUCTS_CACHE_KEY);
+    }
+
+    return res.status(201).json({
+      message: "Product created",
+      product: result.rows[0],
+    });
+  } catch (error) {
+    console.error("Create product failed:", error.message);
+
+    return res.status(500).json({
       error: "Internal server error",
     });
   }
@@ -208,7 +296,7 @@ app.use((req, res) => {
 app.use((error, req, res, next) => {
   console.error("Unhandled application error:", error);
 
-  res.status(500).json({
+  return res.status(500).json({
     error: "Internal server error",
   });
 });
@@ -221,17 +309,39 @@ let server;
 
 async function startApplication() {
   try {
+    console.log("========================================");
     console.log("Starting CloudShop API");
+    console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
     console.log(`PostgreSQL: ${DB_HOST}:${DB_PORT}`);
     console.log(`PostgreSQL SSL: ${DB_SSL}`);
     console.log(`Redis: ${REDIS_HOST}:${REDIS_PORT}`);
+    console.log(`Redis TLS: ${REDIS_TLS}`);
+    console.log("========================================");
+
+    /*
+     * Redis connect.
+     */
+    console.log("Connecting to Redis...");
 
     await redisClient.connect();
+
     console.log("Redis connected");
 
+    /*
+     * PostgreSQL check + initialize table.
+     *
+     * Nếu DB lỗi, API vẫn start để:
+     * /health/live = 200
+     * /health/ready = 503
+     */
     try {
       await pool.query("SELECT 1");
+
       console.log("PostgreSQL connected");
+
+      await initializeProductsTable();
+
+      console.log("Products table ready");
     } catch (error) {
       console.error(
         "Initial PostgreSQL connection failed:",
@@ -243,7 +353,11 @@ async function startApplication() {
       console.log(`Server listening on port ${PORT}`);
     });
   } catch (error) {
-    console.error("Application startup failed:", error.message);
+    console.error(
+      "Application startup failed:",
+      error.message
+    );
+
     process.exit(1);
   }
 }
@@ -253,7 +367,9 @@ async function startApplication() {
 ========================= */
 
 async function shutdown(signal) {
-  console.log(`${signal} received`);
+  console.log(
+    `${signal} received. Shutting down gracefully...`
+  );
 
   try {
     if (server) {
@@ -266,23 +382,38 @@ async function shutdown(signal) {
           resolve();
         });
       });
+
+      console.log("HTTP server closed");
     }
 
     if (redisClient.isOpen) {
       await redisClient.quit();
+
+      console.log("Redis connection closed");
     }
 
     await pool.end();
 
+    console.log("PostgreSQL pool closed");
     console.log("Application stopped");
+
     process.exit(0);
   } catch (error) {
-    console.error("Shutdown failed:", error.message);
+    console.error(
+      "Graceful shutdown failed:",
+      error.message
+    );
+
     process.exit(1);
   }
 }
 
-process.on("SIGTERM", () => shutdown("SIGTERM"));
-process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => {
+  shutdown("SIGTERM");
+});
+
+process.on("SIGINT", () => {
+  shutdown("SIGINT");
+});
 
 startApplication();
