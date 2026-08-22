@@ -105,3 +105,157 @@ Docker's internal DNS resolves service names such as `postgres`, `redis`, and `a
 
 PostgreSQL data is stored in a persistent Docker volume so that database data is not lost when the PostgreSQL container is recreated.
 
+## ❤️ Health Checks
+
+CloudShop uses health endpoints to distinguish between a running application and an application that is ready to serve traffic.
+
+### Liveness
+
+```text
+GET /health
+```
+
+Checks whether the Node.js API process is running.
+
+### Readiness
+
+```text
+GET /health/ready
+```
+
+Checks whether the application is ready to receive traffic and whether required dependencies are available.
+
+Example:
+
+```text
+Node.js API     ✅ Running
+PostgreSQL      ❌ Unavailable
+Redis           ✅ Available
+
+/health         → PASS
+/health/ready   → FAIL
+```
+
+This prevents traffic from being sent to an application instance that is running but not actually ready to serve requests.
+
+---
+
+## 🔄 CI/CD Pipeline
+
+CloudShop uses GitHub Actions to automate build, validation, container image publishing, and application deployment.
+
+```text
+Developer
+    │
+    │ git push
+    ▼
+GitHub Repository
+    │
+    ▼
+GitHub Actions
+    │
+    ├── CI Pipeline
+    │     ├── Install dependencies
+    │     ├── Build containers
+    │     ├── Start Docker Compose stack
+    │     ├── Wait for readiness
+    │     └── Validate application health
+    │
+    ▼
+GitHub OIDC
+    │
+    ▼
+AWS STS
+    │
+    ▼
+IAM Role
+    │
+    ▼
+Amazon ECR
+    │
+    ▼
+Amazon ECS
+    │
+    ▼
+ECS Fargate Tasks
+```
+
+### Continuous Integration
+
+The CI workflow validates the application before deployment.
+
+Typical flow:
+
+```text
+Push / Pull Request
+        │
+        ▼
+Install Dependencies
+        │
+        ▼
+Build Docker Images
+        │
+        ▼
+docker compose up
+        │
+        ▼
+Wait for /health/ready
+        │
+        ├── PASS → CI succeeds
+        │
+        └── FAIL → show logs and fail pipeline
+```
+
+The pipeline waits for application readiness instead of assuming that a started container is immediately ready to serve traffic.
+
+### Continuous Deployment
+
+The CD workflow deploys a validated application version to AWS.
+
+```text
+GitHub Actions
+      │
+      ▼
+Authenticate to AWS
+      │
+      ▼
+Build Docker Image
+      │
+      ▼
+Push Image to Amazon ECR
+      │
+      ▼
+Update ECS Deployment
+      │
+      ▼
+ECS starts new Fargate Tasks
+      │
+      ▼
+ALB Health Check
+      │
+      ├── Healthy → Receive traffic
+      └── Unhealthy → No traffic
+```
+
+---
+
+## 🔐 AWS Authentication with GitHub OIDC
+
+CloudShop uses OpenID Connect instead of storing long-lived AWS access keys in GitHub.
+
+```text
+GitHub Actions
+      │
+      │ OIDC Token
+      ▼
+AWS STS
+      │
+      │ AssumeRoleWithWebIdentity
+      ▼
+IAM Role
+      │
+      ▼
+Temporary AWS Credentials
+```
+
+This approach provides short-lived AWS credentials during the workflow and reduces the risk associated with storing permanent access keys in GitHub Secrets.
