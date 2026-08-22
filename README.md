@@ -873,3 +873,90 @@ docker compose down -v
 ```
 
 Use the `-v` option carefully when the volumes contain persistent local data.
+
+## 🗺️ Project Roadmap
+
+### Completed
+
+* [x] Build Node.js backend application
+* [x] Containerize the backend with Docker
+* [x] Build a multi-container environment with Docker Compose
+* [x] Configure Nginx as a reverse proxy
+* [x] Integrate PostgreSQL
+* [x] Integrate Redis
+* [x] Implement application health and readiness checks
+* [x] Build CI/CD pipelines with GitHub Actions
+* [x] Configure GitHub OIDC authentication with AWS
+* [x] Store Docker images in Amazon ECR
+* [x] Deploy the application using Amazon ECS Fargate
+* [x] Configure an Application Load Balancer
+* [x] Provision AWS infrastructure using Terraform
+* [x] Isolate application and data resources using VPC networking
+* [x] Configure ECS Service Auto Scaling
+
+### Future Improvements
+
+* [ ] Add HTTPS using AWS Certificate Manager
+* [ ] Add AWS WAF protection
+* [ ] Improve automated testing
+* [ ] Implement deployment strategies such as Blue/Green Deployment
+* [ ] Add separate staging and production deployment workflows
+* [ ] Move Terraform state to a remote backend with state locking
+
+---
+
+## 📚 What I Learned
+
+Building CloudShop provided hands-on experience across the complete lifecycle of a containerized application, from local development to deployment on AWS.
+
+### Containerization
+
+* Building Docker images using Dockerfiles
+* Understanding the relationship between images and containers
+* Running multi-container applications with Docker Compose
+* Container networking and Docker DNS
+* Persistent data using Docker volumes
+* Reverse proxy configuration with Nginx
+
+### CI/CD
+
+* Building CI/CD workflows using GitHub Actions
+* Validating application readiness before deployment
+* Building and publishing Docker images
+* Deploying new application versions to Amazon ECS
+* Authenticating GitHub Actions to AWS using OIDC
+* Using temporary AWS credentials instead of long-lived access keys
+
+### AWS
+
+* Designing VPC networking across multiple Availability Zones
+* Separating public, application, and data layers
+* Using an Application Load Balancer as the application entry point
+* Running containerized workloads with ECS Fargate
+* Managing container images with Amazon ECR
+* Using RDS PostgreSQL for persistent relational data
+* Using ElastiCache Redis as a caching layer
+* Controlling network access using Security Groups
+* Managing AWS permissions using IAM
+* Scaling ECS services based on workload
+
+### Infrastructure as Code
+
+* Provisioning AWS infrastructure using Terraform
+* Understanding Terraform configuration, state, variables, and outputs
+* Using `terraform plan` to review infrastructure changes
+* Managing infrastructure changes through version-controlled code
+* Separating GitHub OIDC bootstrap infrastructure from application infrastructure
+
+---
+
+## 🎯 Key Architecture Principles
+
+CloudShop was designed around several core DevOps and cloud architecture principles:
+
+* **Automation** — automate build, validation, deployment, and infrastructure provisioning.
+* **Isolation** — keep application and data resources away from direct public access.
+* **Least Privilege** — grant identities and services only the permissions they require.
+* **Scalability** — allow the application layer to scale horizontally using ECS.
+* **Reproducibility** — define infrastructure and application environments as code.
+* **Stateless Compute** — keep persistent application data outside ECS tasks.
