@@ -642,3 +642,234 @@ ECS
 ```
 
 This reduces the attack surface of the data layer.
+
+## 📈 Auto Scaling
+
+CloudShop uses ECS Service Auto Scaling to adjust the number of running Fargate tasks based on application workload.
+
+```text
+Incoming Traffic
+       │
+       ▼
+Application Load Balancer
+       │
+       ▼
+ECS Service
+       │
+       ├── Task 1
+       └── Task 2
+              │
+              ▼
+       Workload Increases
+              │
+              ▼
+      Auto Scaling Policy
+              │
+              ▼
+    Desired Task Count ↑
+              │
+              ▼
+       New ECS Tasks
+```
+
+### Scaling Flow
+
+When application workload increases, ECS Service Auto Scaling can increase the desired number of tasks.
+
+```text
+Traffic increases
+       ↓
+CPU / Memory utilization increases
+       ↓
+Auto Scaling policy evaluates the metric
+       ↓
+Desired count increases
+       ↓
+ECS launches additional Fargate tasks
+       ↓
+New tasks become healthy
+       ↓
+ALB distributes traffic across healthy tasks
+```
+
+When workload decreases, the service can scale in and reduce unnecessary running tasks.
+
+### Target Tracking
+
+CloudShop can use target tracking policies to keep ECS service utilization around a configured target.
+
+Conceptually:
+
+```text
+CPU too high
+    ↓
+Scale Out
+    ↓
+More Tasks
+
+CPU around target
+    ↓
+Maintain Capacity
+
+CPU consistently low
+    ↓
+Scale In
+    ↓
+Fewer Tasks
+```
+
+This allows the application layer to adapt to workload changes without manually changing the ECS desired task count.
+
+## 📁 Repository Structure
+
+```text
+cloudshop-devops/
+├── .github/
+│   └── workflows/
+│       ├── ci.yml
+│       └── cd.yml
+│
+├── backend/
+│   ├── Dockerfile
+│   ├── app.js
+│   ├── metrics.js
+│   ├── package.json
+│   └── package-lock.json
+│
+├── docs/
+│   ├── cloudshop-architecture.png
+│   └── notes/
+│
+├── infrastructure/
+│   ├── bootstrap/
+│   │   ├── oidc.tf
+│   │   ├── github-role.tf
+│   │   └── github-policy.tf
+│   │
+│   ├── nginx/
+│   │   └── nginx.conf
+│   │
+│   └── terraform/
+│       ├── networking.tf
+│       ├── security.tf
+│       ├── alb.tf
+│       ├── ecs.tf
+│       ├── rds.tf
+│       ├── redis.tf
+│       ├── ecr.tf
+│       ├── iam.tf
+│       ├── secrets.tf
+│       ├── autoscaling.tf
+│       ├── variables.tf
+│       └── outputs.tf
+│
+├── environments/
+├── compose.yaml
+├── load-test.js
+├── .env.example
+├── .gitignore
+└── README.md
+```
+
+### Directory Responsibilities
+
+| Path                        | Purpose                                          |
+| --------------------------- | ------------------------------------------------ |
+| `backend/`                  | Node.js application source code and Dockerfile   |
+| `.github/workflows/`        | CI/CD pipelines                                  |
+| `infrastructure/nginx/`     | Nginx reverse proxy configuration                |
+| `infrastructure/bootstrap/` | GitHub OIDC and AWS IAM bootstrap infrastructure |
+| `infrastructure/terraform/` | Main AWS infrastructure managed with Terraform   |
+| `docs/`                     | Architecture diagrams and project documentation  |
+| `environments/`             | Environment-specific configuration               |
+| `compose.yaml`              | Local multi-container environment                |
+| `load-test.js`              | Application load testing script                  |
+
+---
+
+## 🚀 Local Development
+
+### Prerequisites
+
+Make sure the following tools are installed:
+
+* Git
+* Docker
+* Docker Compose
+
+### 1. Clone the Repository
+
+```bash
+git clone <your-repository-url>
+cd cloudshop-devops
+```
+
+### 2. Configure Environment Variables
+
+Create the local environment file from the provided example:
+
+```bash
+cp .env.example .env
+```
+
+Update the required values in `.env` for your local environment.
+
+Do not commit `.env` to Git.
+
+### 3. Build and Start CloudShop
+
+```bash
+docker compose up -d --build
+```
+
+Docker Compose starts the CloudShop application stack and connects the services through the internal Docker network.
+
+### 4. Check Container Status
+
+```bash
+docker compose ps
+```
+
+Containers should reach their expected running or healthy state before the application is considered ready.
+
+### 5. Check Application Health
+
+```bash
+curl http://localhost/api/health
+```
+
+Readiness can be checked using:
+
+```bash
+curl http://localhost/api/health/ready
+```
+
+### 6. View Logs
+
+View logs for the entire stack:
+
+```bash
+docker compose logs -f
+```
+
+Or inspect the backend specifically:
+
+```bash
+docker compose logs -f api
+```
+
+### 7. Stop the Environment
+
+```bash
+docker compose down
+```
+
+Persistent Docker volumes are preserved by default.
+
+To remove the stack together with its Compose-managed volumes:
+
+```bash
+docker compose down -v
+```
+
+Use the `-v` option carefully when the volumes contain persistent local data.
