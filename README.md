@@ -27,3 +27,11 @@ architecture. Public-facing components receive client traffic while
 application and data services remain isolated in private subnets.
 
 ![CloudShop AWS Architecture](docs/cloudshop-architecture.png)
+
+### Request Flow
+
+1. The client sends an HTTP request to the Application Load Balancer.
+2. The ALB forwards traffic to healthy ECS Fargate tasks.
+3. The Node.js API processes the request.
+4. Persistent application data is stored in Amazon RDS PostgreSQL.
+5. Redis is used as a caching layer to reduce database load and improve response time.
