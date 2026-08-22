@@ -259,3 +259,268 @@ Temporary AWS Credentials
 ```
 
 This approach provides short-lived AWS credentials during the workflow and reduces the risk associated with storing permanent access keys in GitHub Secrets.
+
+## ☁️ AWS Infrastructure
+
+CloudShop is deployed inside an Amazon VPC and designed across multiple Availability Zones to improve availability and isolate application components.
+
+```text id="cnklxv"
+                         Internet
+                            │
+                            ▼
+                    Internet Gateway
+                            │
+                            ▼
+              Application Load Balancer
+                     /             \
+                    /               \
+              Public Subnet     Public Subnet
+                  AZ-1              AZ-2
+                    \               /
+                     \             /
+                      ▼           ▼
+                     ECS Fargate
+                     Application
+                      /         \
+                     ▼           ▼
+                RDS PostgreSQL   ElastiCache
+                    Redis
+```
+
+### VPC and Subnets
+
+The AWS infrastructure is deployed inside a dedicated VPC spanning multiple Availability Zones.
+
+The network is separated into public and private subnets:
+
+* **Public subnets** host internet-facing components such as the Application Load Balancer.
+* **Private application subnets** are used for ECS Fargate workloads.
+* **Private data subnets** isolate RDS PostgreSQL and ElastiCache Redis from direct Internet access.
+
+This separation reduces the public attack surface of the application.
+
+### Application Load Balancer
+
+The Application Load Balancer acts as the public entry point for CloudShop.
+
+```text id="2pyghu"
+Internet
+   │
+   ▼
+ALB
+   │
+   ├── Health Check
+   │
+   ▼
+Target Group
+   │
+   ▼
+Healthy ECS Tasks
+```
+
+The ALB distributes incoming traffic across healthy ECS tasks and prevents unhealthy targets from receiving normal application traffic.
+
+### Amazon ECS Fargate
+
+The Node.js backend runs as containerized tasks managed by Amazon ECS using AWS Fargate.
+
+```text id="5m11ao"
+ECR Image
+    │
+    ▼
+Task Definition
+    │
+    ▼
+ECS Service
+    │
+    ├── Fargate Task
+    ├── Fargate Task
+    └── ...
+```
+
+The ECS Task Definition describes how the application container should run, while the ECS Service maintains the desired number of tasks and integrates them with the Application Load Balancer.
+
+### Amazon RDS PostgreSQL
+
+Amazon RDS PostgreSQL provides persistent relational storage for application data.
+
+```text id="z69m37"
+ECS Task
+    │
+    │ PostgreSQL connection
+    ▼
+Amazon RDS PostgreSQL
+    │
+    ▼
+Persistent Data
+```
+
+The database is isolated from direct Internet access and is accessed by the application layer.
+
+### Amazon ElastiCache Redis
+
+Amazon ElastiCache for Redis provides an in-memory caching layer.
+
+A typical cache flow is:
+
+```text id="u9fkv0"
+GET /products
+      │
+      ▼
+     API
+      │
+      ▼
+    Redis
+    /   \
+ HIT     MISS
+  │        │
+  ▼        ▼
+Return   PostgreSQL
+           │
+           ▼
+        Query Data
+           │
+           ▼
+       Update Cache
+           │
+           ▼
+         Return
+```
+
+Frequently accessed data can be served from Redis instead of repeatedly querying PostgreSQL, reducing database workload and improving response time.
+
+### Security Groups
+
+Security Groups restrict communication between infrastructure layers.
+
+Conceptually, the allowed traffic follows:
+
+```text id="cclu08"
+Internet
+   │
+   │ HTTP/HTTPS
+   ▼
+  ALB
+   │
+   │ Application Port
+   ▼
+  ECS
+   │
+   ├── PostgreSQL :5432 ──► RDS
+   │
+   └── Redis      :6379 ──► ElastiCache
+```
+
+The database and cache layers do not need to accept direct inbound traffic from the Internet.
+
+## 🏗️ Infrastructure as Code with Terraform
+
+CloudShop infrastructure is defined using Terraform, allowing AWS resources to be created and managed through version-controlled infrastructure code instead of manual configuration.
+
+### Terraform Structure
+
+```text
+infrastructure/
+├── bootstrap/
+│   ├── oidc.tf
+│   ├── github-role.tf
+│   ├── github-policy.tf
+│   ├── providers.tf
+│   └── variables.tf
+│
+└── terraform/
+    ├── networking.tf
+    ├── security.tf
+    ├── alb.tf
+    ├── ecs.tf
+    ├── rds.tf
+    ├── redis.tf
+    ├── ecr.tf
+    ├── iam.tf
+    ├── secrets.tf
+    ├── autoscaling.tf
+    ├── cloudwatch.tf
+    ├── monitoring.tf
+    ├── sns.tf
+    ├── variables.tf
+    ├── outputs.tf
+    └── providers.tf
+```
+
+### Infrastructure Provisioning Flow
+
+```text
+Terraform Configuration
+        │
+        ▼
+terraform init
+        │
+        ▼
+terraform plan
+        │
+        ▼
+Review Changes
+        │
+        ▼
+terraform apply
+        │
+        ▼
+AWS Infrastructure
+```
+
+Terraform manages the major infrastructure components of CloudShop, including networking, security, load balancing, container orchestration, data services, monitoring, and auto scaling.
+
+### Infrastructure Modules
+
+| Terraform File   | Responsibility                                  |
+| ---------------- | ----------------------------------------------- |
+| `networking.tf`  | VPC, subnets, routing, and networking resources |
+| `security.tf`    | Security Groups and network access rules        |
+| `alb.tf`         | Application Load Balancer and target group      |
+| `ecs.tf`         | ECS cluster, task definition, and service       |
+| `rds.tf`         | Amazon RDS PostgreSQL                           |
+| `redis.tf`       | Amazon ElastiCache Redis                        |
+| `ecr.tf`         | Amazon ECR container repository                 |
+| `iam.tf`         | AWS IAM roles and permissions                   |
+| `secrets.tf`     | Application secret management                   |
+| `autoscaling.tf` | ECS Service Auto Scaling                        |
+| `cloudwatch.tf`  | CloudWatch logging and monitoring resources     |
+| `monitoring.tf`  | Additional application monitoring configuration |
+| `sns.tf`         | Monitoring notification resources               |
+
+### GitHub OIDC Bootstrap
+
+The `infrastructure/bootstrap` configuration establishes the trust relationship between GitHub Actions and AWS.
+
+```text
+GitHub Actions
+      │
+      │ OIDC Token
+      ▼
+AWS OIDC Provider
+      │
+      ▼
+IAM Trust Policy
+      │
+      ▼
+GitHub IAM Role
+      │
+      ▼
+Temporary AWS Credentials
+```
+
+Separating the bootstrap infrastructure from the main application infrastructure helps isolate the resources required for GitHub-to-AWS authentication.
+
+### Terraform State
+
+Terraform state files and real environment variable files are intentionally excluded from Git:
+
+```text
+*.tfstate
+*.tfstate.*
+*.tfvars
+```
+
+Only example configuration files such as `terraform.tfvars.example` are stored in the repository.
+
+This prevents local Terraform state and environment-specific values from being accidentally committed to source control.
