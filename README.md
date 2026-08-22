@@ -1,222 +1,225 @@
-# ☁️ CloudShop — AWS DevOps E-Commerce Platform
+# ☁️ CloudShop --- AWS DevOps E-Commerce Platform
 
-CloudShop is a hands-on DevOps project that demonstrates how a containerized e-commerce backend can be built, tested, and deployed to AWS using modern DevOps practices.
+CloudShop is a hands-on DevOps project that demonstrates how a
+containerized e-commerce backend can be built, tested, deployed,
+secured, and scaled on AWS using modern DevOps practices.
 
-The project focuses on containerization, CI/CD automation, cloud infrastructure, security, scalability, and observability.
+The project focuses on containerization, CI/CD automation,
+Infrastructure as Code, cloud networking, security, and scalability.
+
+## 📑 Table of Contents
+
+-   [Architecture](#️-architecture)
+-   [Tech Stack](#️-tech-stack)
+-   [Local Docker Architecture](#-local-docker-architecture)
+-   [Health Checks](#️-health-checks)
+-   [CI/CD Pipeline](#-cicd-pipeline)
+-   [AWS Infrastructure](#️-aws-infrastructure)
+-   [Infrastructure as Code](#️-infrastructure-as-code-with-terraform)
+-   [Security](#-security)
+-   [Auto Scaling](#-auto-scaling)
+-   [Repository Structure](#-repository-structure)
+-   [Local Development](#-local-development)
+-   [Roadmap](#️-project-roadmap)
+-   [What I Learned](#-what-i-learned)
 
 ## 🎯 Project Goals
 
-* Containerize the application using Docker.
-* Run multiple services locally with Docker Compose.
-* Use Nginx as a reverse proxy.
-* Store persistent application data in PostgreSQL.
-* Use Redis for caching.
-* Build automated CI/CD pipelines with GitHub Actions.
-* Store Docker images in Amazon ECR.
-* Deploy the application using Amazon ECS Fargate.
-* Design a secure AWS network architecture.
-* Implement monitoring and observability.
+-   Containerize the Node.js backend with Docker.
+-   Run the local application stack with Docker Compose.
+-   Use Nginx as a reverse proxy.
+-   Use PostgreSQL for persistent relational data.
+-   Use Redis as a caching layer.
+-   Build automated CI/CD pipelines with GitHub Actions.
+-   Authenticate GitHub Actions to AWS using OIDC.
+-   Store container images in Amazon ECR.
+-   Deploy containers with Amazon ECS Fargate.
+-   Route traffic through an Application Load Balancer.
+-   Provision AWS infrastructure with Terraform.
+-   Isolate application and data resources using AWS networking and
+    Security Groups.
+-   Scale the ECS application layer horizontally.
 
 ## 🏗️ Architecture
 
-The CloudShop infrastructure is designed around a multi-AZ AWS VPC architecture. Public-facing components receive client traffic while application and data services remain isolated in private subnets.
-
 ![CloudShop AWS Architecture](docs/cloudshop-architecture.png)
+
+CloudShop uses a multi-AZ AWS architecture. The internet-facing
+Application Load Balancer is the public entry point, while application
+and data resources are isolated from direct Internet access.
 
 ### Request Flow
 
-1. The client sends an HTTP request to the Application Load Balancer.
-2. The ALB forwards traffic to healthy ECS Fargate tasks.
-3. The Node.js API processes the request.
-4. Persistent application data is stored in Amazon RDS PostgreSQL.
-5. Redis is used as a caching layer to reduce database load and improve response time.
+``` text
+Client
+  │
+  ▼
+Application Load Balancer
+  │
+  ▼
+Target Group
+  │
+  ▼
+ECS Fargate Tasks
+  │
+  ├──► Amazon RDS PostgreSQL
+  └──► Amazon ElastiCache Redis
+```
+
+1.  The client sends a request to the Application Load Balancer.
+2.  The ALB forwards traffic to healthy ECS task targets.
+3.  The Node.js API processes application logic.
+4.  PostgreSQL stores persistent relational data.
+5.  Redis can serve frequently accessed data from memory to reduce
+    repeated database queries.
 
 ## 🛠️ Tech Stack
 
-| Layer                  | Technology                      |
-| ---------------------- | ------------------------------- |
-| Backend                | Node.js, Express                |
-| Containerization       | Docker                          |
-| Local Orchestration    | Docker Compose                  |
-| Reverse Proxy          | Nginx                           |
-| Database               | PostgreSQL                      |
-| Cache                  | Redis                           |
-| Container Registry     | Amazon ECR                      |
-| Compute                | Amazon ECS Fargate              |
-| Load Balancing         | Application Load Balancer       |
-| Infrastructure as Code | Terraform                       |
-| CI/CD                  | GitHub Actions                  |
-| AWS Authentication     | GitHub OIDC + IAM               |
-| Monitoring             | CloudWatch, Prometheus, Grafana |
-| Auto Scaling           | ECS Service Auto Scaling        |
+  Layer                    Technology
+  ------------------------ ----------------------------
+  Backend                  Node.js, Express
+  Containerization         Docker
+  Local Orchestration      Docker Compose
+  Reverse Proxy            Nginx
+  Database                 PostgreSQL / Amazon RDS
+  Cache                    Redis / Amazon ElastiCache
+  Container Registry       Amazon ECR
+  Compute                  Amazon ECS Fargate
+  Load Balancing           Application Load Balancer
+  Infrastructure as Code   Terraform
+  CI/CD                    GitHub Actions
+  AWS Authentication       GitHub OIDC, STS, IAM
+  Auto Scaling             ECS Service Auto Scaling
 
 ## 🐳 Local Docker Architecture
 
-Before deploying to AWS, CloudShop can run locally as a multi-container application using Docker Compose.
+Before deployment to AWS, CloudShop runs locally as a multi-container
+application.
 
-```text
+``` text
 Client
   │
   ▼
 Nginx :80
   │
-  │ Reverse Proxy
+  │ reverse proxy
   ▼
 Node.js API :3000
   │
   ├──► PostgreSQL :5432
-  │
   └──► Redis :6379
 ```
 
 ### Components
 
-**Nginx**
+**Nginx** acts as the local entry point and forwards API requests to the
+backend.
 
-Acts as the entry point of the local application and forwards API requests to the Node.js backend.
+**Node.js API** handles application logic and communicates with
+PostgreSQL and Redis.
 
-**Node.js API**
+**PostgreSQL** stores persistent application data.
 
-Handles application logic and communicates with PostgreSQL and Redis.
+**Redis** provides an in-memory caching layer.
 
-**PostgreSQL**
+**Docker Network** allows containers to communicate through service
+names rather than hard-coded container IP addresses.
 
-Stores persistent application data.
-
-**Redis**
-
-Provides an in-memory caching layer to improve response time and reduce unnecessary database queries.
-
-**Docker Network**
-
-Allows containers to communicate using service names instead of hard-coded IP addresses.
-
-For example:
-
-```text
-API → postgres:5432
-API → redis:6379
-Nginx → api:3000
+``` text
+nginx → api:3000
+api   → postgres:5432
+api   → redis:6379
 ```
 
-Docker's internal DNS resolves service names such as `postgres`, `redis`, and `api` to the correct container addresses.
+Docker's internal DNS resolves service names such as `api`, `postgres`,
+and `redis`.
 
-**Docker Volume**
-
-PostgreSQL data is stored in a persistent Docker volume so that database data is not lost when the PostgreSQL container is recreated.
+**Docker Volume** keeps PostgreSQL data outside the lifecycle of the
+database container so the container can be recreated without
+automatically losing persistent data.
 
 ## ❤️ Health Checks
 
-CloudShop uses health endpoints to distinguish between a running application and an application that is ready to serve traffic.
+CloudShop distinguishes between a process that is alive and an
+application that is ready to serve traffic.
 
 ### Liveness
 
-```text
+``` text
 GET /health
 ```
 
-Checks whether the Node.js API process is running.
+Checks whether the Node.js API is alive.
 
 ### Readiness
 
-```text
+``` text
 GET /health/ready
 ```
 
-Checks whether the application is ready to receive traffic and whether required dependencies are available.
+Checks whether the application is ready to serve requests and whether
+required dependencies are available.
 
 Example:
 
-```text
-Node.js API     ✅ Running
-PostgreSQL      ❌ Unavailable
-Redis           ✅ Available
+``` text
+Node.js API    ✅ Running
+PostgreSQL     ❌ Unavailable
+Redis          ✅ Available
 
-/health         → PASS
-/health/ready   → FAIL
+/health        → PASS
+/health/ready  → FAIL
 ```
 
-This prevents traffic from being sent to an application instance that is running but not actually ready to serve requests.
-
----
+A started container is not necessarily a ready application. This
+distinction is also useful during CI validation and load-balancer health
+checking.
 
 ## 🔄 CI/CD Pipeline
 
-CloudShop uses GitHub Actions to automate build, validation, container image publishing, and application deployment.
+CloudShop uses two GitHub Actions workflows:
 
-```text
-Developer
-    │
-    │ git push
-    ▼
-GitHub Repository
-    │
-    ▼
-GitHub Actions
-    │
-    ├── CI Pipeline
-    │     ├── Install dependencies
-    │     ├── Build containers
-    │     ├── Start Docker Compose stack
-    │     ├── Wait for readiness
-    │     └── Validate application health
-    │
-    ▼
-GitHub OIDC
-    │
-    ▼
-AWS STS
-    │
-    ▼
-IAM Role
-    │
-    ▼
-Amazon ECR
-    │
-    ▼
-Amazon ECS
-    │
-    ▼
-ECS Fargate Tasks
+``` text
+.github/workflows/
+├── ci.yml
+└── cd.yml
 ```
 
 ### Continuous Integration
 
 The CI workflow validates the application before deployment.
 
-Typical flow:
-
-```text
+``` text
 Push / Pull Request
         │
         ▼
 Install Dependencies
         │
         ▼
-Build Docker Images
+Build Containers
         │
         ▼
-docker compose up
+Start Docker Compose Stack
         │
         ▼
 Wait for /health/ready
         │
         ├── PASS → CI succeeds
-        │
-        └── FAIL → show logs and fail pipeline
+        └── FAIL → pipeline fails
 ```
 
-The pipeline waits for application readiness instead of assuming that a started container is immediately ready to serve traffic.
+The pipeline waits for readiness instead of assuming that a newly
+started container can immediately serve requests.
 
 ### Continuous Deployment
 
-The CD workflow deploys a validated application version to AWS.
+The deployment flow is designed around container images and ECS:
 
-```text
+``` text
 GitHub Actions
       │
       ▼
-Authenticate to AWS
+Authenticate to AWS with OIDC
       │
       ▼
 Build Docker Image
@@ -228,25 +231,24 @@ Push Image to Amazon ECR
 Update ECS Deployment
       │
       ▼
-ECS starts new Fargate Tasks
+ECS Starts New Fargate Tasks
       │
       ▼
 ALB Health Check
       │
-      ├── Healthy → Receive traffic
-      └── Unhealthy → No traffic
+      ├── Healthy   → receive traffic
+      └── Unhealthy → do not receive normal traffic
 ```
 
----
+### GitHub OIDC Authentication
 
-## 🔐 AWS Authentication with GitHub OIDC
+CloudShop uses OpenID Connect instead of storing long-lived AWS access
+keys in GitHub.
 
-CloudShop uses OpenID Connect instead of storing long-lived AWS access keys in GitHub.
-
-```text
+``` text
 GitHub Actions
       │
-      │ OIDC Token
+      │ OIDC token
       ▼
 AWS STS
       │
@@ -258,73 +260,50 @@ IAM Role
 Temporary AWS Credentials
 ```
 
-This approach provides short-lived AWS credentials during the workflow and reduces the risk associated with storing permanent access keys in GitHub Secrets.
+This limits reliance on permanent AWS credentials in the CI/CD
+environment.
 
 ## ☁️ AWS Infrastructure
 
-CloudShop is deployed inside an Amazon VPC and designed across multiple Availability Zones to improve availability and isolate application components.
-
-```text id="cnklxv"
-                         Internet
-                            │
-                            ▼
-                    Internet Gateway
-                            │
-                            ▼
-              Application Load Balancer
-                     /             \
-                    /               \
-              Public Subnet     Public Subnet
-                  AZ-1              AZ-2
-                    \               /
-                     \             /
-                      ▼           ▼
-                     ECS Fargate
-                     Application
-                      /         \
-                     ▼           ▼
-                RDS PostgreSQL   ElastiCache
-                    Redis
-```
-
 ### VPC and Subnets
 
-The AWS infrastructure is deployed inside a dedicated VPC spanning multiple Availability Zones.
+The infrastructure is deployed inside an Amazon VPC spanning multiple
+Availability Zones.
 
-The network is separated into public and private subnets:
+The network separates public-facing components from private application
+and data resources:
 
-* **Public subnets** host internet-facing components such as the Application Load Balancer.
-* **Private application subnets** are used for ECS Fargate workloads.
-* **Private data subnets** isolate RDS PostgreSQL and ElastiCache Redis from direct Internet access.
-
-This separation reduces the public attack surface of the application.
+-   **Public subnets** provide placement for the internet-facing
+    Application Load Balancer.
+-   **Private application subnets** provide placement for ECS Fargate
+    workloads.
+-   **Private data subnets** isolate RDS PostgreSQL and ElastiCache
+    Redis.
 
 ### Application Load Balancer
 
-The Application Load Balancer acts as the public entry point for CloudShop.
+The ALB is the public entry point.
 
-```text id="2pyghu"
+``` text
 Internet
    │
    ▼
-ALB
-   │
-   ├── Health Check
+Application Load Balancer
    │
    ▼
 Target Group
    │
-   ▼
-Healthy ECS Tasks
+   ├── Healthy ECS Task
+   └── Healthy ECS Task
 ```
 
-The ALB distributes incoming traffic across healthy ECS tasks and prevents unhealthy targets from receiving normal application traffic.
+The ALB distributes incoming traffic across healthy registered targets.
 
 ### Amazon ECS Fargate
 
-The Node.js backend runs as containerized tasks managed by Amazon ECS using AWS Fargate.
+The Node.js backend runs as containerized ECS tasks using AWS Fargate.
 
-```text id="5m11ao"
+``` text
 ECR Image
     │
     ▼
@@ -334,36 +313,38 @@ Task Definition
 ECS Service
     │
     ├── Fargate Task
-    ├── Fargate Task
-    └── ...
+    └── Fargate Task
 ```
 
-The ECS Task Definition describes how the application container should run, while the ECS Service maintains the desired number of tasks and integrates them with the Application Load Balancer.
+The **Task Definition** describes how a task runs, including its image,
+CPU, memory, ports, environment configuration, secrets, and logging
+configuration.
+
+The **ECS Service** maintains the desired task count and manages
+deployment of the application workload.
 
 ### Amazon RDS PostgreSQL
 
-Amazon RDS PostgreSQL provides persistent relational storage for application data.
+RDS PostgreSQL provides persistent relational storage for application
+data.
 
-```text id="z69m37"
+``` text
 ECS Task
-    │
-    │ PostgreSQL connection
-    ▼
-Amazon RDS PostgreSQL
-    │
-    ▼
-Persistent Data
+   │
+   │ TCP 5432
+   ▼
+RDS PostgreSQL
 ```
 
-The database is isolated from direct Internet access and is accessed by the application layer.
+The database does not need direct public Internet access.
 
 ### Amazon ElastiCache Redis
 
-Amazon ElastiCache for Redis provides an in-memory caching layer.
+Redis provides an in-memory caching layer.
 
-A typical cache flow is:
+A typical cache-aside flow is:
 
-```text id="u9fkv0"
+``` text
 GET /products
       │
       ▼
@@ -374,11 +355,11 @@ GET /products
     /   \
  HIT     MISS
   │        │
-  ▼        ▼
-Return   PostgreSQL
+Return     ▼
+       PostgreSQL
            │
            ▼
-        Query Data
+       Query Data
            │
            ▼
        Update Cache
@@ -387,39 +368,17 @@ Return   PostgreSQL
          Return
 ```
 
-Frequently accessed data can be served from Redis instead of repeatedly querying PostgreSQL, reducing database workload and improving response time.
-
-### Security Groups
-
-Security Groups restrict communication between infrastructure layers.
-
-Conceptually, the allowed traffic follows:
-
-```text id="cclu08"
-Internet
-   │
-   │ HTTP/HTTPS
-   ▼
-  ALB
-   │
-   │ Application Port
-   ▼
-  ECS
-   │
-   ├── PostgreSQL :5432 ──► RDS
-   │
-   └── Redis      :6379 ──► ElastiCache
-```
-
-The database and cache layers do not need to accept direct inbound traffic from the Internet.
+PostgreSQL remains the persistent source of application data while Redis
+can accelerate repeated reads.
 
 ## 🏗️ Infrastructure as Code with Terraform
 
-CloudShop infrastructure is defined using Terraform, allowing AWS resources to be created and managed through version-controlled infrastructure code instead of manual configuration.
+CloudShop infrastructure is defined with Terraform so infrastructure
+changes can be reviewed and version controlled.
 
 ### Terraform Structure
 
-```text
+``` text
 infrastructure/
 ├── bootstrap/
 │   ├── oidc.tf
@@ -439,17 +398,18 @@ infrastructure/
     ├── iam.tf
     ├── secrets.tf
     ├── autoscaling.tf
-    ├── cloudwatch.tf
-    ├── monitoring.tf
-    ├── sns.tf
     ├── variables.tf
     ├── outputs.tf
     └── providers.tf
 ```
 
-### Infrastructure Provisioning Flow
+> If the repository still contains `erc.tf`, rename it to `ecr.tf` if
+> that file defines Amazon ECR resources so the filename matches the AWS
+> service name.
 
-```text
+### Provisioning Flow
+
+``` text
 Terraform Configuration
         │
         ▼
@@ -468,34 +428,27 @@ terraform apply
 AWS Infrastructure
 ```
 
-Terraform manages the major infrastructure components of CloudShop, including networking, security, load balancing, container orchestration, data services, monitoring, and auto scaling.
-
-### Infrastructure Modules
-
-| Terraform File   | Responsibility                                  |
-| ---------------- | ----------------------------------------------- |
-| `networking.tf`  | VPC, subnets, routing, and networking resources |
-| `security.tf`    | Security Groups and network access rules        |
-| `alb.tf`         | Application Load Balancer and target group      |
-| `ecs.tf`         | ECS cluster, task definition, and service       |
-| `rds.tf`         | Amazon RDS PostgreSQL                           |
-| `redis.tf`       | Amazon ElastiCache Redis                        |
-| `ecr.tf`         | Amazon ECR container repository                 |
-| `iam.tf`         | AWS IAM roles and permissions                   |
-| `secrets.tf`     | Application secret management                   |
-| `autoscaling.tf` | ECS Service Auto Scaling                        |
-| `cloudwatch.tf`  | CloudWatch logging and monitoring resources     |
-| `monitoring.tf`  | Additional application monitoring configuration |
-| `sns.tf`         | Monitoring notification resources               |
+  Terraform File     Responsibility
+  ------------------ --------------------------------------------
+  `networking.tf`    VPC, subnets, routing, and networking
+  `security.tf`      Security Groups and network access rules
+  `alb.tf`           Application Load Balancer and target group
+  `ecs.tf`           ECS cluster, task definition, and service
+  `rds.tf`           Amazon RDS PostgreSQL
+  `redis.tf`         Amazon ElastiCache Redis
+  `ecr.tf`           Amazon ECR repository
+  `iam.tf`           IAM roles and permissions
+  `secrets.tf`       Application secret configuration
+  `autoscaling.tf`   ECS Service Auto Scaling
 
 ### GitHub OIDC Bootstrap
 
-The `infrastructure/bootstrap` configuration establishes the trust relationship between GitHub Actions and AWS.
+The `infrastructure/bootstrap/` configuration establishes the trust
+relationship used by GitHub Actions.
 
-```text
+``` text
 GitHub Actions
       │
-      │ OIDC Token
       ▼
 AWS OIDC Provider
       │
@@ -506,263 +459,152 @@ IAM Trust Policy
 GitHub IAM Role
       │
       ▼
-Temporary AWS Credentials
+Temporary Credentials
 ```
-
-Separating the bootstrap infrastructure from the main application infrastructure helps isolate the resources required for GitHub-to-AWS authentication.
 
 ### Terraform State
 
-Terraform state files and real environment variable files are intentionally excluded from Git:
+Local Terraform state and real variable files are excluded from Git:
 
-```text
+``` text
 *.tfstate
 *.tfstate.*
 *.tfvars
 ```
 
-Only example configuration files such as `terraform.tfvars.example` are stored in the repository.
+Example configuration files remain version controlled:
 
-This prevents local Terraform state and environment-specific values from being accidentally committed to source control.
+``` text
+terraform.tfvars.example
+.env.example
+```
+
+For a team or production-oriented setup, a remote Terraform backend with
+state locking is a useful future improvement.
+
 ## 🔐 Security
 
-CloudShop applies multiple security controls across the network, application, CI/CD, and data layers.
+CloudShop applies security controls across networking, AWS identity,
+CI/CD authentication, and data access.
 
 ### Network Isolation
 
-The infrastructure separates public-facing resources from application and data resources.
-
-```text
+``` text
 Internet
    │
    ▼
-Public Layer
 Application Load Balancer
    │
    ▼
-Private Application Layer
-ECS Fargate Tasks
+Private ECS Application Layer
    │
-   ├──► RDS PostgreSQL
-   └──► ElastiCache Redis
-        Private Data Layer
+   ├──► Private RDS PostgreSQL
+   └──► Private ElastiCache Redis
 ```
 
-The Application Load Balancer acts as the public entry point, while application and data resources are not directly exposed to the Internet.
+Only the required public entry point needs to accept Internet traffic.
 
 ### Security Groups
 
-Security Groups restrict traffic between infrastructure layers.
+Traffic between layers is restricted with Security Groups.
 
-```text
+``` text
 Internet
-   │
    │ HTTP/HTTPS
    ▼
 ALB Security Group
-   │
-   │ Application traffic
+   │ Application Port
    ▼
 ECS Security Group
    │
    ├── TCP 5432 ──► RDS Security Group
-   │
    └── TCP 6379 ──► Redis Security Group
 ```
 
-Instead of allowing database access from arbitrary IP addresses, the data layer accepts traffic only from the application layer that requires it.
+The data layer should accept connections from the required application
+security group rather than arbitrary Internet addresses.
 
-### GitHub OIDC
+### IAM and Least Privilege
 
-GitHub Actions authenticates to AWS using OpenID Connect (OIDC).
+IAM roles and policies control which AWS API actions identities and
+workloads can perform.
 
-```text
-GitHub Actions
-      │
-      │ OIDC Token
-      ▼
-AWS STS
-      │
-      ▼
-IAM Role
-      │
-      ▼
-Temporary Credentials
-```
-
-This avoids storing long-lived AWS access keys directly in the CI/CD pipeline.
-
-### IAM
-
-IAM roles and policies control which AWS actions CloudShop components and CI/CD workflows are allowed to perform.
-
-Permissions should follow the principle of least privilege:
+The project follows the principle:
 
 > Grant only the permissions required to perform the intended task.
 
-### Secrets Management
+### Secrets and Sensitive Files
 
-Sensitive application configuration should not be hard-coded into source code, Docker images, or committed Terraform variable files.
+Sensitive values should not be hard-coded in source code, Docker images,
+or committed Terraform variable files.
 
-CloudShop separates sensitive configuration from application source code and keeps local environment and Terraform state files out of Git.
+Ignored local files include:
 
-Examples of files excluded from version control include:
-
-```text
+``` text
 .env
 *.tfvars
 *.tfstate
 *.tfstate.*
 ```
 
-Example files can remain in the repository:
-
-```text
-.env.example
-terraform.tfvars.example
-```
-
-### Data Layer Protection
-
-PostgreSQL and Redis are application dependencies and do not need direct public Internet access.
-
-```text
-Internet
-   │
-   X
-   ├────────► PostgreSQL :5432
-   │
-   X
-   └────────► Redis :6379
-
-ECS
- │
- ├──────────► PostgreSQL :5432
- └──────────► Redis :6379
-```
-
-This reduces the attack surface of the data layer.
+Example files can safely describe required configuration without
+containing real secrets.
 
 ## 📈 Auto Scaling
 
-CloudShop uses ECS Service Auto Scaling to adjust the number of running Fargate tasks based on application workload.
+CloudShop uses ECS Service Auto Scaling to adjust the number of running
+Fargate tasks according to workload.
 
-```text
-Incoming Traffic
+``` text
+Traffic Increases
        │
        ▼
-Application Load Balancer
+CPU / Memory Utilization Increases
        │
        ▼
-ECS Service
+Target Tracking Policy
        │
-       ├── Task 1
-       └── Task 2
-              │
-              ▼
-       Workload Increases
-              │
-              ▼
-      Auto Scaling Policy
-              │
-              ▼
-    Desired Task Count ↑
-              │
-              ▼
-       New ECS Tasks
+       ▼
+Desired Task Count Increases
+       │
+       ▼
+ECS Launches Additional Tasks
+       │
+       ▼
+Tasks Become Healthy
+       │
+       ▼
+ALB Distributes Traffic
 ```
 
-### Scaling Flow
+When demand decreases, the service can scale in and reduce the number of
+tasks.
 
-When application workload increases, ECS Service Auto Scaling can increase the desired number of tasks.
-
-```text
-Traffic increases
-       ↓
-CPU / Memory utilization increases
-       ↓
-Auto Scaling policy evaluates the metric
-       ↓
-Desired count increases
-       ↓
-ECS launches additional Fargate tasks
-       ↓
-New tasks become healthy
-       ↓
-ALB distributes traffic across healthy tasks
-```
-
-When workload decreases, the service can scale in and reduce unnecessary running tasks.
-
-### Target Tracking
-
-CloudShop can use target tracking policies to keep ECS service utilization around a configured target.
-
-Conceptually:
-
-```text
-CPU too high
-    ↓
-Scale Out
-    ↓
-More Tasks
-
-CPU around target
-    ↓
-Maintain Capacity
-
-CPU consistently low
-    ↓
-Scale In
-    ↓
-Fewer Tasks
-```
-
-This allows the application layer to adapt to workload changes without manually changing the ECS desired task count.
+This is **horizontal scaling**: changing the number of tasks rather than
+increasing the CPU or memory of one existing task.
 
 ## 📁 Repository Structure
 
-```text
+``` text
 cloudshop-devops/
 ├── .github/
 │   └── workflows/
 │       ├── ci.yml
 │       └── cd.yml
-│
 ├── backend/
 │   ├── Dockerfile
 │   ├── app.js
 │   ├── metrics.js
 │   ├── package.json
 │   └── package-lock.json
-│
 ├── docs/
 │   ├── cloudshop-architecture.png
 │   └── notes/
-│
 ├── infrastructure/
 │   ├── bootstrap/
-│   │   ├── oidc.tf
-│   │   ├── github-role.tf
-│   │   └── github-policy.tf
-│   │
 │   ├── nginx/
 │   │   └── nginx.conf
-│   │
 │   └── terraform/
-│       ├── networking.tf
-│       ├── security.tf
-│       ├── alb.tf
-│       ├── ecs.tf
-│       ├── rds.tf
-│       ├── redis.tf
-│       ├── ecr.tf
-│       ├── iam.tf
-│       ├── secrets.tf
-│       ├── autoscaling.tf
-│       ├── variables.tf
-│       └── outputs.tf
-│
 ├── environments/
 ├── compose.yaml
 ├── load-test.js
@@ -771,192 +613,184 @@ cloudshop-devops/
 └── README.md
 ```
 
-### Directory Responsibilities
+  -----------------------------------------------------------------------
+  Path                                Purpose
+  ----------------------------------- -----------------------------------
+  `backend/`                          Node.js application source and
+                                      Dockerfile
 
-| Path                        | Purpose                                          |
-| --------------------------- | ------------------------------------------------ |
-| `backend/`                  | Node.js application source code and Dockerfile   |
-| `.github/workflows/`        | CI/CD pipelines                                  |
-| `infrastructure/nginx/`     | Nginx reverse proxy configuration                |
-| `infrastructure/bootstrap/` | GitHub OIDC and AWS IAM bootstrap infrastructure |
-| `infrastructure/terraform/` | Main AWS infrastructure managed with Terraform   |
-| `docs/`                     | Architecture diagrams and project documentation  |
-| `environments/`             | Environment-specific configuration               |
-| `compose.yaml`              | Local multi-container environment                |
-| `load-test.js`              | Application load testing script                  |
+  `.github/workflows/`                CI/CD workflows
 
----
+  `infrastructure/nginx/`             Nginx reverse proxy configuration
+
+  `infrastructure/bootstrap/`         GitHub OIDC and IAM bootstrap
+                                      infrastructure
+
+  `infrastructure/terraform/`         Main AWS infrastructure
+
+  `docs/`                             Architecture diagrams and project
+                                      notes
+
+  `environments/`                     Environment-specific configuration
+
+  `compose.yaml`                      Local multi-container environment
+
+  `load-test.js`                      Load-testing script
+  -----------------------------------------------------------------------
 
 ## 🚀 Local Development
 
 ### Prerequisites
 
-Make sure the following tools are installed:
-
-* Git
-* Docker
-* Docker Compose
+-   Git
+-   Docker
+-   Docker Compose
 
 ### 1. Clone the Repository
 
-```bash
+``` bash
 git clone <your-repository-url>
 cd cloudshop-devops
 ```
 
 ### 2. Configure Environment Variables
 
-Create the local environment file from the provided example:
-
-```bash
+``` bash
 cp .env.example .env
 ```
 
-Update the required values in `.env` for your local environment.
+Update the required local values in `.env`. Do not commit the real
+`.env` file.
 
-Do not commit `.env` to Git.
+### 3. Start CloudShop
 
-### 3. Build and Start CloudShop
-
-```bash
+``` bash
 docker compose up -d --build
 ```
 
-Docker Compose starts the CloudShop application stack and connects the services through the internal Docker network.
-
 ### 4. Check Container Status
 
-```bash
+``` bash
 docker compose ps
 ```
 
-Containers should reach their expected running or healthy state before the application is considered ready.
+### 5. Verify Health
 
-### 5. Check Application Health
-
-```bash
+``` bash
 curl http://localhost/api/health
-```
-
-Readiness can be checked using:
-
-```bash
 curl http://localhost/api/health/ready
 ```
 
 ### 6. View Logs
 
-View logs for the entire stack:
-
-```bash
+``` bash
 docker compose logs -f
 ```
 
-Or inspect the backend specifically:
+If the backend service in `compose.yaml` is named `api`:
 
-```bash
+``` bash
 docker compose logs -f api
 ```
 
 ### 7. Stop the Environment
 
-```bash
+``` bash
 docker compose down
 ```
 
-Persistent Docker volumes are preserved by default.
+To also remove Compose-managed volumes:
 
-To remove the stack together with its Compose-managed volumes:
-
-```bash
+``` bash
 docker compose down -v
 ```
 
-Use the `-v` option carefully when the volumes contain persistent local data.
+Use `-v` carefully because persistent local database data may be
+removed.
 
 ## 🗺️ Project Roadmap
 
+Use `[x]` only for features that have actually been deployed and tested.
+
 ### Completed
 
-* [x] Build Node.js backend application
-* [x] Containerize the backend with Docker
-* [x] Build a multi-container environment with Docker Compose
-* [x] Configure Nginx as a reverse proxy
-* [x] Integrate PostgreSQL
-* [x] Integrate Redis
-* [x] Implement application health and readiness checks
-* [x] Build CI/CD pipelines with GitHub Actions
-* [x] Configure GitHub OIDC authentication with AWS
-* [x] Store Docker images in Amazon ECR
-* [x] Deploy the application using Amazon ECS Fargate
-* [x] Configure an Application Load Balancer
-* [x] Provision AWS infrastructure using Terraform
-* [x] Isolate application and data resources using VPC networking
-* [x] Configure ECS Service Auto Scaling
+-   [x] Build Node.js backend application
+-   [x] Containerize the backend with Docker
+-   [x] Run the application with Docker Compose
+-   [x] Configure Nginx as a reverse proxy
+-   [x] Integrate PostgreSQL
+-   [x] Integrate Redis
+-   [x] Implement health and readiness checks
+-   [x] Build GitHub Actions CI/CD workflows
+-   [x] Configure GitHub OIDC authentication with AWS
+-   [x] Store Docker images in Amazon ECR
+-   [x] Deploy the application with Amazon ECS Fargate
+-   [x] Configure an Application Load Balancer
+-   [x] Provision AWS infrastructure with Terraform
+-   [x] Isolate application and data resources with VPC networking
+-   [x] Configure ECS Service Auto Scaling
 
 ### Future Improvements
 
-* [ ] Add HTTPS using AWS Certificate Manager
-* [ ] Add AWS WAF protection
-* [ ] Improve automated testing
-* [ ] Implement deployment strategies such as Blue/Green Deployment
-* [ ] Add separate staging and production deployment workflows
-* [ ] Move Terraform state to a remote backend with state locking
-
----
+-   [ ] Add HTTPS with AWS Certificate Manager
+-   [ ] Add AWS WAF protection
+-   [ ] Improve automated testing
+-   [ ] Implement Blue/Green deployment
+-   [ ] Separate staging and production deployment workflows
+-   [ ] Move Terraform state to a remote backend with state locking
 
 ## 📚 What I Learned
 
-Building CloudShop provided hands-on experience across the complete lifecycle of a containerized application, from local development to deployment on AWS.
-
 ### Containerization
 
-* Building Docker images using Dockerfiles
-* Understanding the relationship between images and containers
-* Running multi-container applications with Docker Compose
-* Container networking and Docker DNS
-* Persistent data using Docker volumes
-* Reverse proxy configuration with Nginx
+-   Docker image and container lifecycle
+-   Multi-container applications with Docker Compose
+-   Docker networking and internal DNS
+-   Persistent data with Docker volumes
+-   Reverse proxy configuration with Nginx
+-   Liveness and readiness concepts
 
 ### CI/CD
 
-* Building CI/CD workflows using GitHub Actions
-* Validating application readiness before deployment
-* Building and publishing Docker images
-* Deploying new application versions to Amazon ECS
-* Authenticating GitHub Actions to AWS using OIDC
-* Using temporary AWS credentials instead of long-lived access keys
+-   GitHub Actions workflow design
+-   Application validation before deployment
+-   Building and publishing Docker images
+-   Deploying application versions to ECS
+-   GitHub-to-AWS authentication with OIDC
+-   Temporary AWS credentials with STS
 
 ### AWS
 
-* Designing VPC networking across multiple Availability Zones
-* Separating public, application, and data layers
-* Using an Application Load Balancer as the application entry point
-* Running containerized workloads with ECS Fargate
-* Managing container images with Amazon ECR
-* Using RDS PostgreSQL for persistent relational data
-* Using ElastiCache Redis as a caching layer
-* Controlling network access using Security Groups
-* Managing AWS permissions using IAM
-* Scaling ECS services based on workload
+-   VPC and multi-AZ architecture
+-   Public and private network separation
+-   Application Load Balancer and target groups
+-   ECS services, task definitions, and Fargate tasks
+-   Amazon ECR
+-   Amazon RDS PostgreSQL
+-   Amazon ElastiCache Redis
+-   Security Groups
+-   IAM and least privilege
+-   ECS Service Auto Scaling
 
 ### Infrastructure as Code
 
-* Provisioning AWS infrastructure using Terraform
-* Understanding Terraform configuration, state, variables, and outputs
-* Using `terraform plan` to review infrastructure changes
-* Managing infrastructure changes through version-controlled code
-* Separating GitHub OIDC bootstrap infrastructure from application infrastructure
-
----
+-   Terraform configuration and resource lifecycle
+-   `terraform init`, `plan`, and `apply`
+-   Terraform variables and outputs
+-   Terraform state
+-   Version-controlled infrastructure
+-   Separating OIDC bootstrap resources from application infrastructure
 
 ## 🎯 Key Architecture Principles
 
-CloudShop was designed around several core DevOps and cloud architecture principles:
-
-* **Automation** — automate build, validation, deployment, and infrastructure provisioning.
-* **Isolation** — keep application and data resources away from direct public access.
-* **Least Privilege** — grant identities and services only the permissions they require.
-* **Scalability** — allow the application layer to scale horizontally using ECS.
-* **Reproducibility** — define infrastructure and application environments as code.
-* **Stateless Compute** — keep persistent application data outside ECS tasks.
+-   **Automation** --- automate build, validation, deployment, and
+    infrastructure provisioning.
+-   **Isolation** --- keep application and data resources away from
+    unnecessary public access.
+-   **Least Privilege** --- grant only required AWS permissions.
+-   **Scalability** --- scale the application layer horizontally with
+    ECS.
+-   **Reproducibility** --- define application environments and
+    infrastructure as code.
+-   **Stateless Compute** --- keep persistent application data outside
+    ECS tasks.
