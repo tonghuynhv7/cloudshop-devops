@@ -524,3 +524,121 @@ Terraform state files and real environment variable files are intentionally excl
 Only example configuration files such as `terraform.tfvars.example` are stored in the repository.
 
 This prevents local Terraform state and environment-specific values from being accidentally committed to source control.
+## 🔐 Security
+
+CloudShop applies multiple security controls across the network, application, CI/CD, and data layers.
+
+### Network Isolation
+
+The infrastructure separates public-facing resources from application and data resources.
+
+```text
+Internet
+   │
+   ▼
+Public Layer
+Application Load Balancer
+   │
+   ▼
+Private Application Layer
+ECS Fargate Tasks
+   │
+   ├──► RDS PostgreSQL
+   └──► ElastiCache Redis
+        Private Data Layer
+```
+
+The Application Load Balancer acts as the public entry point, while application and data resources are not directly exposed to the Internet.
+
+### Security Groups
+
+Security Groups restrict traffic between infrastructure layers.
+
+```text
+Internet
+   │
+   │ HTTP/HTTPS
+   ▼
+ALB Security Group
+   │
+   │ Application traffic
+   ▼
+ECS Security Group
+   │
+   ├── TCP 5432 ──► RDS Security Group
+   │
+   └── TCP 6379 ──► Redis Security Group
+```
+
+Instead of allowing database access from arbitrary IP addresses, the data layer accepts traffic only from the application layer that requires it.
+
+### GitHub OIDC
+
+GitHub Actions authenticates to AWS using OpenID Connect (OIDC).
+
+```text
+GitHub Actions
+      │
+      │ OIDC Token
+      ▼
+AWS STS
+      │
+      ▼
+IAM Role
+      │
+      ▼
+Temporary Credentials
+```
+
+This avoids storing long-lived AWS access keys directly in the CI/CD pipeline.
+
+### IAM
+
+IAM roles and policies control which AWS actions CloudShop components and CI/CD workflows are allowed to perform.
+
+Permissions should follow the principle of least privilege:
+
+> Grant only the permissions required to perform the intended task.
+
+### Secrets Management
+
+Sensitive application configuration should not be hard-coded into source code, Docker images, or committed Terraform variable files.
+
+CloudShop separates sensitive configuration from application source code and keeps local environment and Terraform state files out of Git.
+
+Examples of files excluded from version control include:
+
+```text
+.env
+*.tfvars
+*.tfstate
+*.tfstate.*
+```
+
+Example files can remain in the repository:
+
+```text
+.env.example
+terraform.tfvars.example
+```
+
+### Data Layer Protection
+
+PostgreSQL and Redis are application dependencies and do not need direct public Internet access.
+
+```text
+Internet
+   │
+   X
+   ├────────► PostgreSQL :5432
+   │
+   X
+   └────────► Redis :6379
+
+ECS
+ │
+ ├──────────► PostgreSQL :5432
+ └──────────► Redis :6379
+```
+
+This reduces the attack surface of the data layer.
